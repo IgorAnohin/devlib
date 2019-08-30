@@ -13,6 +13,7 @@
 #include <memory>
 
 #include <QMap>
+#include <QSet>
 
 namespace winutil {
     Q_LOGGING_CATEGORY(winlog, "windows_native");
@@ -165,6 +166,53 @@ namespace winutil {
         hub = QString::number(hub.toInt() + 1);
 
         return ports.replace(QRegularExpression("^\\."), hub + "-");
+    }
+
+
+    static auto findBusNumber(DEVINST const& handle, QMap<QString, int> & cachedDeviceBuses) {
+        static auto rootHubsBuses = initializeRootBuses();
+        qDebug() << "Buses" << rootHubsBuses;
+
+
+        auto currentDevInst = handle;
+        DEVINST parentDevInst;
+        WCHAR instanceID [MAX_DEVICE_ID_LEN];
+
+        auto visitedDevices = QSet<QString>{};
+        CM_Get_Device_ID(currentDevInst, instanceID , MAX_PATH, 0);
+        visitedDevices.insert(QString::fromWCharArray(instanceID));
+
+        int bus;
+        for(;;) {
+            if (CM_Get_Parent(&parentDevInst, currentDevInst, 0) != CR_SUCCESS) {
+                bus = -1;
+                break;
+            }
+            if (CM_Get_Device_ID(parentDevInst, instanceID , MAX_PATH, 0) != CR_SUCCESS) {
+                bus = -2;
+                break;
+            }
+
+            currentDevInst = parentDevInst;
+            auto parentInstanceId = QString::fromWCharArray(instanceID);
+            qDebug() << "parentInstanceId" << parentInstanceId;
+            if (rootHubsBuses.find(parentInstanceId) != rootHubsBuses.end()) {
+                qDebug() << "Bus";
+                bus = rootHubsBuses[parentInstanceId];
+                break;
+            }
+            if (cachedDeviceBuses.find(parentInstanceId) != cachedDeviceBuses.end()) {
+                qDebug() << "Cache";
+                bus = cachedDeviceBuses[parentInstanceId];
+                break;
+            }
+            visitedDevices.insert(parentInstanceId);
+        }
+
+        for (auto & devInstanceId : visitedDevices) {
+            cachedDeviceBuses[devInstanceId] = bus;
+        }
+        return QString::number(bus);
     }
 
 
